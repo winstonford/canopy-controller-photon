@@ -1,0 +1,32 @@
+<!-- Replace your-device-ID-goes-here with your actual device ID
+and replace your-access-token-goes-here with your actual access token-->
+<!DOCTYPE>
+<html>
+  <body>
+  <center>
+  <br>
+  <br>
+  <br>
+  <form 
+action="https://api.particle.io/v1/devices/3e0029000b51353335323535/switches?access_token=f5c75ca3178639d9241040cac895462906920ed5" 
+method="POST">
+    Solar Logger Switch Control<br>
+    <br>
+    <input type="radio" name="arg" value="S1ON">Turn S1 on.
+    <br>
+    <input type="radio" name="arg" value="S2ON">Turn S2 on.
+    <br>
+    <input type="radio" name="arg" value="S3ON">Turn S3 on.
+    <br>
+    <input type="radio" name="arg" value="S4ON">Turn S4 on.
+    <br>
+    <input type="radio" name="arg" value="SOFF">Turn all switches off.
+    <br>
+    <br>
+    <input type="submit" value="Do it!">
+  </form>
+  </center>
+  </body>
+</html>
+
+

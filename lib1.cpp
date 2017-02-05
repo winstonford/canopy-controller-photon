@@ -26,8 +26,7 @@
 /**************************************************************************/
 void SDL_Arduino_INA3221::wireWriteRegister (uint8_t board, uint8_t reg, uint16_t value)
 {
-  // board is the board number, 0 thru 3 if several INA3221 boards are on the same I2C 
-bus.
+  // board is the board number, 0 thru 3 if several INA3221 boards are on the same I2C bus.
   Wire.beginTransmission(INA3221_i2caddr + board);
     //Serial.print("Write address = ");
     //Serial.println(INA3221_i2caddr + board);

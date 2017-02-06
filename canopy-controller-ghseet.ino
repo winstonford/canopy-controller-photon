@@ -15,6 +15,7 @@
 ////////////////////////////////////////////////////////////////////////////
 //
 #include "Particle.h"
+#include "MQTT.h"
 
 #include "lib1.h"
 
@@ -50,6 +51,63 @@ uint16_t loopcount;
 // Constant to convert ADC counts to degrees Kelvin
 const float ktemp = 100.0 * ((20.0 + 5.62) / 20.0) * (3.3 / 4095.0);
 
+
+// replace these values with your own, you can get them from cayenne's website'
+const String CLIENTID = "GET_IT_FROM_CAYENNE_WHEN_YOU_ADD_A_DEVICE";
+const String USERNAME = "GET_IT_FROM_CAYENNE_WHEN_YOU_ADD_A_DEVICE";
+const String PASSWORD = "GET_IT_FROM_CAYENNE_WHEN_YOU_ADD_A_DEVICE";
+
+// for sending values to cayenne, one must send a publish to a topic+channel
+// Source: See section "Send Sensor data" on https://mydevices.com/cayenne/docs/#bring-your-own-thing-api-mqtt-messaging-topics
+// Example: v1/username/things/clientID/data/channel
+// My example: "v1/" + USERNAME + "/things/" + CLIENTID + "/data/2"
+// I will leave the channel (the 2 above) out so it can be configured by the code using this constant
+const String cayenneSendSensorData = "v1/" + USERNAME + "/things/" + CLIENTID + "/data/";
+
+// for receiving commands from cayenne, one must do the following:
+// Source: See section "Receive Actuator command" on https://mydevices.com/cayenne/docs/#bring-your-own-thing-api-mqtt-messaging-topics
+// 1- Receive Actuator command
+// 2- Send Actuator Updated Value
+// 3- Send command response
+// 
+// this translates into:
+// 1- Receive Actuator command:
+//    1.a -> subscribe to topic cmd+channel
+//    1.b -> expect a publish from cayenne into it
+//    1.c -> parse command sequence number
+//
+// Example from cayenne site on step 1:
+// Receive Actuator Command on Channel 3
+// => SUB v1/A1234B5678C/things/0123-4567-89AB-CDEF/cmd/3
+// <= 2otoExGxnMJz0Jn,0
+//
+// 2- Send Actuator Updated Value
+//    2.a -> publish current value of actuator to topic/channel
+// Example from cayenne site on step 2:
+// Send updated Actuator value on Channel 3
+// => PUB v1/A1234B5678C/things/0123-4567-89AB-CDEF/digital/3
+// 1
+//
+// 3- Send command response -> publish command response to topic response with result
+// Example from cayenne site on step 3:
+// Send a Command Response - OK
+// => PUB v1/A1234B5678C/things/0123-4567-89AB-CDEF/response
+// ok,2otoExGxnMJz0Jn
+//
+
+const String cayenneReceiveActuatorCommand = "v1/" + USERNAME + "/things/" + CLIENTID + "/cmd/";
+const String cayenneSendCommandResponse = "v1/" + USERNAME + "/things/" + CLIENTID + "/response";
+
+// example value
+int value10 = 0;
+
+void mqttCallback(char* topic, byte* payload, unsigned int length);
+
+// ip of mqtt.mydevices.com
+byte mqttServer[] = { 54, 87, 58, 187 };
+MQTT mqttClient(mqttServer, 1883, mqttCallback);
+
+
 void setup(void)
 {
   Serial.begin(57600);
@@ -66,6 +124,9 @@ void setup(void)
   pinMode (D4, OUTPUT);
   pinMode (D5, OUTPUT);
   pinMode (D6, OUTPUT);
+
+  mqttConnect();
+  
 // Set up internet switch control function
   Particle.function("switches",switchToggle);
 }
@@ -139,8 +200,7 @@ void loop(void)
   // Reset Zener line ready for next time
   digitalWrite(D6, LOW);
 
-  // Prepare string for publishing.  Vars temp and voltage to 1 decimal place, current 
-as an integer
+  // Prepare string for publishing.  Vars temp and voltage to 1 decimal place, current as an integer
   /*
   outstring = "";
   outstring = outstring + String(T1, 1) + ", ";
@@ -188,42 +248,43 @@ as an integer
     I9 = 1234;
     V9 = 18.7;
  */   
-  Particle.publish("pg", 
+
 // Subject to Particle limit of 255 bytes / chars
 // Tested Max per value is 5 digits: 3 digits, point, one decimal (example 123.4) 
 // Settings: 
-// Temps (in F)and Volts are set to one decimal place, which in practice, whether we use 
-C or F, is 4 digits: 78.4
-// Current (in milliamps) is set to zero decimal points which in practice is also 4 
-digits: 1597 Interesting that we save a char by mA, in amps is 5 digits 1.597
-    "{\"a\":\"" + String(T1, 1) + 
-    "\",\"b\":\"" + String(T2, 1) + 
-    "\",\"d\":\"" + String(T3, 1) + 
-    "\",\"e\":\"" + String(V1, 1) + 
-    "\",\"f\":\"" + String(I1, 0) + 
-    "\",\"g\":\"" + String(V2, 1) + 
-    "\",\"h\":\"" + String(I2, 0) + 
-    "\",\"i\":\"" + String(V3, 1) + 
-    "\",\"j\":\"" + String(I3, 0) + 
-    "\",\"k\":\"" + String(V4, 1) + 
-    "\",\"l\":\"" + String(I4, 0) + 
-    "\",\"m\":\"" + String(V5, 1) + 
-    "\",\"n\":\"" + String(I5, 0) + 
-    "\",\"o\":\"" + String(V6, 1) + 
-    "\",\"p\":\"" + String(I6, 0) + 
-    "\",\"q\":\"" + String(V7, 1) + 
-    "\",\"r\":\"" + String(I7, 0) + 
-    "\",\"s\":\"" + String(V8, 1) + 
-    "\",\"t\":\"" + String(I8, 0) + 
-    "\",\"u\":\"" + String(V9, 1) + 
-    "\",\"v\":\"" + String(I9, 0) + 
+// Temps (in F)and Volts are set to one decimal place, which in practice, whether we use C or F, is 4 digits: 78.4
+// Current (in milliamps) is set to zero decimal points which in practice is also 4 digits: 1597 Interesting that we save a char by mA, in amps is 5 digits 1.597
 
 //    "\",\"c\":\"" + String("3") +  ->> c is NOT SUPPORTED BY GOOGLE SCRIPTS ARRGGGGG
 
-    "\"}",
-    60, PRIVATE);
 
-delay(120000);
+//COMMENTED SINCE loop is executed every second. I suggest this publish to get its own function and timer ;)
+  // Particle.publish("pg", 
+  //   "{\"a\":\"" + String(T1, 1) + 
+  //   "\",\"b\":\"" + String(T2, 1) + 
+  //   "\",\"d\":\"" + String(T3, 1) + 
+  //   "\",\"e\":\"" + String(V1, 1) + 
+  //   "\",\"f\":\"" + String(I1, 0) + 
+  //   "\",\"g\":\"" + String(V2, 1) + 
+  //   "\",\"h\":\"" + String(I2, 0) + 
+  //   "\",\"i\":\"" + String(V3, 1) + 
+  //   "\",\"j\":\"" + String(I3, 0) + 
+  //   "\",\"k\":\"" + String(V4, 1) + 
+  //   "\",\"l\":\"" + String(I4, 0) + 
+  //   "\",\"m\":\"" + String(V5, 1) + 
+  //   "\",\"n\":\"" + String(I5, 0) + 
+  //   "\",\"o\":\"" + String(V6, 1) + 
+  //   "\",\"p\":\"" + String(I6, 0) + 
+  //   "\",\"q\":\"" + String(V7, 1) + 
+  //   "\",\"r\":\"" + String(I7, 0) + 
+  //   "\",\"s\":\"" + String(V8, 1) + 
+  //   "\",\"t\":\"" + String(I8, 0) + 
+  //   "\",\"u\":\"" + String(V9, 1) + 
+  //   "\",\"v\":\"" + String(I9, 0) + 
+  //   "\"}",
+  //   60, PRIVATE);
+// delay(120000);
+
 
 #ifdef DEBUG_SERIAL
   // If DEBUG is defined, output everything to the serial port
@@ -247,6 +308,13 @@ delay(120000);
   for(i = 0; i < 1; i++)
     delay(SAMPLETIME);
 #endif
+
+  mqttLoop();
+  //this writes to a widget on channel 10
+  mqttPublish(cayenneSendSensorData + "10", String(value10));
+  value10 = value10 +1;
+  delay(1000);
+
 }
 
 int switchToggle(String command) {
@@ -292,3 +360,166 @@ int switchToggle(String command) {
     return -1;
   }
 }
+
+/*******************************************************************************
+ * Function Name  : mqttConnect
+ * Description    : connects to the mqtt broker and subscribes to interesting topics
+ * Return         : true if success, false otherwise
+ *******************************************************************************/
+bool mqttConnect()
+{
+  if (mqttClient.isConnected())
+    return true;
+  
+  mqttClient.connect( CLIENTID, USERNAME, PASSWORD);
+
+  if (mqttClient.isConnected()) {
+    Particle.publish("MQTT connected", "Hurray!", PRIVATE);
+  } else {
+    Particle.publish("MQTT failed to connect", "", PRIVATE);
+    return false;
+  }
+
+  // we need to subscribe to topics that this device is interested in  
+  mqttSubscribeToInterestingTopics();
+
+  return true;
+
+}
+
+// Cayenne: Receive Actuator command
+// In order to receive a command for a given data channel, the device must subscribe to the “cmd” topic.
+// Topic	                               PUB  SUB
+// v1/username/things/clientID/cmd/channel	 	X    Payload will contain a command sequence number followed by the value.
+//                                                    The Developer is responsible for managing the value format.
+// (string) seq,value
+// Source: https://mydevices.com/cayenne/docs/#bring-your-own-thing-api-mqtt-messaging-topics
+
+/*******************************************************************************
+ * Function Name  : mqttSubscribeToInterestingTopics
+ * Description    : subscribes to interesting topics
+ * Return         : none
+ *******************************************************************************/
+void mqttSubscribeToInterestingTopics()
+{
+  mqttClient.subscribe(cayenneReceiveActuatorCommand + "1");
+  mqttClient.subscribe(cayenneReceiveActuatorCommand + "2");
+}
+
+/*******************************************************************************
+ * Function Name  : mqttLoop
+ * Description    : processes the mqtt events
+ * Return         : true if success, false otherwise
+ *******************************************************************************/
+bool mqttLoop()
+{
+  if (mqttClient.isConnected()) {
+    mqttClient.loop();
+    return true;
+  }
+
+  return false;
+}
+
+/*******************************************************************************
+ * Function Name  : mqttPublish
+ * Description    : publishes the payload to the topic
+ * Parameters     : String topic
+                    String payload
+ * Return         : true if success, false otherwise
+ *******************************************************************************/
+bool mqttPublish(String topic, String payload)
+{
+  if (mqttClient.isConnected()) {
+    mqttClient.publish(topic, payload);
+    return true;
+  }
+
+  return false;
+}
+
+/*******************************************************************************
+ * Function Name  : mqttCallback
+ * Description    : receives publishes sent by the mqtt broker
+ * Parameters     : char* topic
+                    byte* payload
+                    unsigned int length
+ * Return         : none
+ *******************************************************************************/
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  char p[length + 1];
+  memcpy(p, payload, length);
+  p[length] = NULL;
+  String payloadStr(p);
+  String topicStr(topic);
+
+  // of course there would be much better ways of achieving this, but for now this can do just fine
+  String channel = "";
+  if (topicStr == cayenneReceiveActuatorCommand+"1") {
+    channel = "1";
+  } else if (topicStr == cayenneReceiveActuatorCommand+"2") {
+    channel = "2";
+  }
+
+  if (channel == "") {
+    Particle.publish( "ERROR", "unknown MQTT command received", PRIVATE);
+    return;
+  }
+
+  Particle.publish( "MQTT command received", channel + " " + payloadStr, PRIVATE);
+
+  // parse payload to extract the value to be set
+  // Example: 2otoExGxnMJz0Jn,0
+  // and we want 0
+  int commaPosition = payloadStr.indexOf(",");
+  String commandValue = payloadStr.substring(commaPosition+1);
+  Particle.publish( "DEBUG value", commandValue, PRIVATE);
+  
+  // parse payload to extract the command sequence number
+  // Example: 2otoExGxnMJz0Jn,0
+  // and we want 2otoExGxnMJz0Jn
+  String commandSequenceNumber = payloadStr.remove(commaPosition);
+  Particle.publish( "DEBUG seqNumber", commandSequenceNumber, PRIVATE);
+
+
+  // this executes step 2 of cayenne's handshake:
+  // Send updated Actuator value on Channel 3
+  // => PUB v1/A1234B5678C/things/0123-4567-89AB-CDEF/digital/3   <<-- I believe digital is a mistake in the docs
+  // 1
+  mqttPublish(cayenneSendSensorData + channel, commandValue);
+
+ 
+  // this executes step 3 of cayenne's handshake:
+  // Send a Command Response - OK
+  // => PUB v1/A1234B5678C/things/0123-4567-89AB-CDEF/response
+  // ok,2otoExGxnMJz0Jn
+  mqttPublish(cayenneSendCommandResponse, "ok," + commandSequenceNumber);
+
+
+  //**********************************************************************************************
+  //**********************************************************************************************
+  //**********************************************************************************************
+  // IT IS HERE that you call the function that will set your relays on/off
+  // channel is the relay number and commandValue contains 1 or 0 for on or off
+  //**********************************************************************************************
+  //**********************************************************************************************
+  //**********************************************************************************************
+
+  if (channel == "1") {
+      if (commandValue=="0") {
+        digitalWrite(D2,LOW);
+      } else {
+        digitalWrite(D2,HIGH);
+      }
+  }
+
+  if (channel == "2") {
+      if (commandValue=="0") {
+        digitalWrite(D3,LOW);
+      } else {
+        digitalWrite(D3,HIGH);
+      }
+  }
+
+}
+// this is the end compadre, que mas? ;)
